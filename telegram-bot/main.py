@@ -1,6 +1,6 @@
 """
 main.py — Bot entry point.
-Wires together middleware, routers, DB, and starts polling.
+Wires together routers, DB lifecycle, and starts polling.
 No business logic lives here.
 """
 
@@ -13,7 +13,7 @@ import sys
 
 from dotenv import load_dotenv
 
-# Load .env before anything else so all os.getenv() calls see the values
+# Must be first — loads .env before any os.getenv() call below
 load_dotenv()
 
 from aiogram import Bot, Dispatcher
@@ -36,47 +36,40 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# ─── Bot & Dispatcher factory ─────────────────────────────────────────────────
+# ─── Build dispatcher ─────────────────────────────────────────────────────────
 
 def build_dispatcher() -> Dispatcher:
-    """
-    Create the dispatcher with FSM storage and register all routers.
-    The order of router inclusion matters: more-specific routers first.
-    """
     dp = Dispatcher(storage=MemoryStorage())
-
-    # Register routers — messages first (contains FSM states),
-    # callbacks second (catch-all callback handler).
-    dp.include_router(messages_router.router)
-    dp.include_router(callbacks_router.router)
-
+    dp.include_router(messages_router.router)   # FSM states registered here first
+    dp.include_router(callbacks_router.router)  # catch-all callbacks last
     return dp
 
 
-# ─── Startup / Shutdown hooks ─────────────────────────────────────────────────
+# ─── Lifecycle ────────────────────────────────────────────────────────────────
 
 async def on_startup(bot: Bot) -> None:
-    """Runs once before polling begins."""
+    """Called once before polling starts. DB must be ready before any update arrives."""
     await init_db()
     me = await bot.get_me()
-    logger.info("Bot started: @%s (id=%d)", me.username, me.id)
+    logger.info("✅  Bot live: @%s  (id=%d)", me.username, me.id)
+    logger.info("✅  Polling started — Railway deployment healthy.")
 
 
 async def on_shutdown(bot: Bot) -> None:
-    """Runs once after polling stops."""
     await close_db()
     await bot.session.close()
     logger.info("Bot shut down cleanly.")
 
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
+# ─── Entry point ──────────────────────────────────────────────────────────────
 
 async def main() -> None:
-    # FIX: env var is TOKEN (not BOT_TOKEN) — matches Railway/Replit secret name
-    token = os.environ.get("TOKEN")
+    # Secret name on Railway / Replit: TOKEN  (not BOT_TOKEN)
+    token = os.getenv("TOKEN")
     if not token:
         logger.critical(
-            "TOKEN is not set. Add it to Railway Variables or .env and restart."
+            "❌  TOKEN env var is not set. "
+            "Set it in Railway → Variables and redeploy."
         )
         sys.exit(1)
 
@@ -85,16 +78,14 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = build_dispatcher()
-
-    # Register lifecycle hooks on the dispatcher
     dp.startup.register(lambda: on_startup(bot))
     dp.shutdown.register(lambda: on_shutdown(bot))
 
-    logger.info("Starting polling (Railway / non-webhook mode)...")
+    logger.info("Starting polling (long-poll, no webhook)...")
     await dp.start_polling(
         bot,
         allowed_updates=dp.resolve_used_update_types(),
-        drop_pending_updates=True,   # ignore messages sent while bot was offline
+        drop_pending_updates=True,
     )
 
 
@@ -102,4 +93,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logger.info("Bot stopped by operator.")
+        logger.info("Stopped by operator.")

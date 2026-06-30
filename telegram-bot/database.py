@@ -1,129 +1,105 @@
 """
-database.py — Async SQLAlchemy + DAO pattern with connection pooling.
-All DB interaction goes through DAO methods; no raw SQL elsewhere.
+database.py — Tortoise-ORM models + DAO pattern.
+Connection pooling is handled internally by tortoise-orm / asyncpg.
+No sessions, no factories — DAOs call model class-methods directly.
+
+DATABASE_URL formats accepted (tortoise-orm uses asyncpg driver):
+  asyncpg://user:pass@host:5432/dbname
+  postgres://user:pass@host:5432/dbname        ← Railway default
+  postgresql://user:pass@host:5432/dbname
+  postgresql+asyncpg://...                     ← SQLAlchemy style (converted)
 """
 
 from __future__ import annotations
 
 import os
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import (
-    BigInteger, String, Text, DateTime, Integer,
-    select, update, func
-)
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from tortoise import Tortoise, fields
+from tortoise.models import Model
+from tortoise.expressions import F
 
 logger = logging.getLogger(__name__)
 
+
 # ─── ORM Models ──────────────────────────────────────────────────────────────
 
-class Base(DeclarativeBase):
-    pass
-
-
-class User(Base):
-    """Telegram user record."""
-    __tablename__ = "users"
+class User(Model):
     __slots__ = ()
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)          # Telegram user_id
-    username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    full_name: Mapped[str] = mapped_column(String(128))
-    language_code: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
-    joined_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-    )
-    message_count: Mapped[int] = mapped_column(Integer, default=0)
+    id            = fields.BigIntField(pk=True)          # Telegram user_id
+    username      = fields.CharField(max_length=64,  null=True)
+    full_name     = fields.CharField(max_length=128)
+    language_code = fields.CharField(max_length=8,   null=True)
+    joined_at     = fields.DatetimeField(auto_now_add=True)
+    message_count = fields.IntField(default=0)
+
+    class Meta:
+        table = "users"
 
 
-class ConversationMessage(Base):
-    """Stores per-user AI conversation history (lazy-loaded per request)."""
-    __tablename__ = "conversation_messages"
+class ConversationMessage(Model):
     __slots__ = ()
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
-    role: Mapped[str] = mapped_column(String(16))          # "user" | "assistant"
-    content: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+    id         = fields.IntField(pk=True)
+    user_id    = fields.BigIntField(index=True)
+    role       = fields.CharField(max_length=16)   # "user" | "assistant"
+    content    = fields.TextField()
+    created_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        table = "conversation_messages"
+
+
+# ─── Connection lifecycle ─────────────────────────────────────────────────────
+
+def _normalise_db_url(raw: str) -> str:
+    """
+    Tortoise-orm needs an asyncpg:// or postgres:// scheme.
+    Convert SQLAlchemy-style postgresql+asyncpg:// if present.
+    """
+    return (
+        raw.replace("postgresql+asyncpg://", "asyncpg://")
+           .replace("postgresql://",         "asyncpg://")
     )
-
-
-# ─── Engine / Session Factory ─────────────────────────────────────────────────
-
-_engine: Optional[AsyncEngine] = None
-_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
-
-
-def get_engine() -> AsyncEngine:
-    """Return the singleton engine (connection-pool already configured)."""
-    global _engine
-    if _engine is None:
-        raise RuntimeError("Database not initialised — call init_db() first.")
-    return _engine
-
-
-def get_session_factory() -> async_sessionmaker[AsyncSession]:
-    global _session_factory
-    if _session_factory is None:
-        raise RuntimeError("Database not initialised — call init_db() first.")
-    return _session_factory
 
 
 async def init_db() -> None:
     """
-    Initialise engine with asyncpg connection pool, create tables.
-    Call once at startup in main.py.
+    Initialise Tortoise-ORM with the DATABASE_URL env var.
+    Raises clearly if the variable is missing.
+    Creates tables if they don't exist (safe for first deploy).
     """
-    global _engine, _session_factory
+    raw_url = os.getenv("DATABASE_URL")
+    if not raw_url:
+        raise EnvironmentError(
+            "DATABASE_URL is not set. "
+            "Add it to Railway Variables: "
+            "asyncpg://user:pass@host:5432/dbname"
+        )
 
-    url = os.environ["DATABASE_URL"]
-    _engine = create_async_engine(
-        url,
-        pool_size=10,           # max persistent connections
-        max_overflow=20,        # extra connections under spike load
-        pool_pre_ping=True,     # detect stale connections automatically
-        echo=False,
+    db_url = _normalise_db_url(raw_url)
+
+    await Tortoise.init(
+        db_url=db_url,
+        modules={"models": ["database"]},
     )
-    _session_factory = async_sessionmaker(
-        _engine,
-        expire_on_commit=False,
-        class_=AsyncSession,
-    )
-
-    async with _engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    logger.info("Database initialised ✓")
+    await Tortoise.generate_schemas(safe=True)   # safe=True = no-op if tables exist
+    logger.info("Database initialised ✓  (url scheme: %s)", db_url.split("://")[0])
 
 
 async def close_db() -> None:
-    """Dispose connection pool on shutdown."""
-    if _engine:
-        await _engine.dispose()
-        logger.info("Database connection pool closed.")
+    """Gracefully close all asyncpg connections on shutdown."""
+    await Tortoise.close_connections()
+    logger.info("Database connections closed.")
 
 
-# ─── Data Access Object ───────────────────────────────────────────────────────
+# ─── Data Access Objects ──────────────────────────────────────────────────────
 
 class UserDAO:
-    """All User-table operations. Instantiate with an open AsyncSession."""
-    __slots__ = ("_session",)
-
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
+    """All User-table operations. No session needed — tortoise is global."""
+    __slots__ = ()
 
     async def get_or_create(
         self,
@@ -132,66 +108,47 @@ class UserDAO:
         full_name: str,
         language_code: Optional[str] = None,
     ) -> User:
-        """Fetch user or insert if missing. Returns the ORM object."""
-        result = await self._session.execute(select(User).where(User.id == user_id))
-        user = result.scalar_one_or_none()
-        if user is None:
-            user = User(
-                id=user_id,
-                username=username,
-                full_name=full_name,
-                language_code=language_code,
-            )
-            self._session.add(user)
-            await self._session.commit()
+        user, _ = await User.get_or_create(
+            id=user_id,
+            defaults={
+                "username":      username,
+                "full_name":     full_name,
+                "language_code": language_code,
+            },
+        )
         return user
 
     async def increment_message_count(self, user_id: int) -> None:
-        await self._session.execute(
-            update(User)
-            .where(User.id == user_id)
-            .values(message_count=User.message_count + 1)
-        )
-        await self._session.commit()
+        await User.filter(id=user_id).update(message_count=F("message_count") + 1)
 
     async def total_users(self) -> int:
-        result = await self._session.execute(select(func.count()).select_from(User))
-        return result.scalar_one()
+        return await User.all().count()
 
 
 class ConversationDAO:
-    """Lazy-loads AI conversation history per user; never bulk-caches all users."""
-    __slots__ = ("_session",)
+    """
+    Lazy per-user conversation history — never loads all users at once.
+    MAX_HISTORY caps context window to keep AI costs bounded.
+    """
+    __slots__ = ()
 
-    MAX_HISTORY = 20    # keep last N messages per user to limit context size
-
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
+    MAX_HISTORY: int = 20
 
     async def get_history(self, user_id: int) -> list[dict[str, str]]:
         """
-        Fetch only this user's last MAX_HISTORY messages — lazy, on demand.
-        Returns list[{"role": ..., "content": ...}] for AI API consumption.
+        Fetch last MAX_HISTORY messages for this user only.
+        Returns list[{"role": ..., "content": ...}] — chronological order.
         """
-        result = await self._session.execute(
-            select(ConversationMessage)
-            .where(ConversationMessage.user_id == user_id)
-            .order_by(ConversationMessage.created_at.desc())
+        rows = (
+            await ConversationMessage.filter(user_id=user_id)
+            .order_by("-created_at")
             .limit(self.MAX_HISTORY)
         )
-        rows = result.scalars().all()
-        # Reverse so oldest → newest (correct chronological order for AI)
+        # Reverse: DB returns newest-first; AI expects oldest-first
         return [{"role": m.role, "content": m.content} for m in reversed(rows)]
 
     async def add_message(self, user_id: int, role: str, content: str) -> None:
-        msg = ConversationMessage(user_id=user_id, role=role, content=content)
-        self._session.add(msg)
-        await self._session.commit()
+        await ConversationMessage.create(user_id=user_id, role=role, content=content)
 
     async def clear_history(self, user_id: int) -> None:
-        result = await self._session.execute(
-            select(ConversationMessage).where(ConversationMessage.user_id == user_id)
-        )
-        for msg in result.scalars().all():
-            await self._session.delete(msg)
-        await self._session.commit()
+        await ConversationMessage.filter(user_id=user_id).delete()
