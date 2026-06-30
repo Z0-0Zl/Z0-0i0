@@ -72,9 +72,12 @@ async def on_shutdown(bot: Bot) -> None:
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 async def main() -> None:
-    token = os.environ.get("BOT_TOKEN")
+    # FIX: env var is TOKEN (not BOT_TOKEN) — matches Railway/Replit secret name
+    token = os.environ.get("TOKEN")
     if not token:
-        logger.critical("BOT_TOKEN is not set. Aborting.")
+        logger.critical(
+            "TOKEN is not set. Add it to Railway Variables or .env and restart."
+        )
         sys.exit(1)
 
     bot = Bot(

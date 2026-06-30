@@ -1,6 +1,9 @@
 """
 keyboards.py — Centralised markup factory.
 All InlineKeyboardMarkup / ReplyKeyboardMarkup objects are built here.
+
+FIX: dev social buttons omitted if env var not set — Telegram rejects
+     non-http URLs, so '#' fallback would crash keyboard send.
 """
 
 from __future__ import annotations
@@ -17,30 +20,28 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 # ─── Helper ───────────────────────────────────────────────────────────────────
 
-def _url(env_key: str, fallback: str = "#") -> str:
-    """Read a URL from .env; fall back to '#' if unset."""
-    return os.getenv(env_key, fallback)
+def _url(env_key: str) -> str | None:
+    """Return URL from env, or None if unset/empty. Callers skip None entries."""
+    val = os.getenv(env_key, "").strip()
+    return val if val else None
 
 
 # ─── Main Menu (Reply Keyboard) ───────────────────────────────────────────────
 
 def main_menu_keyboard() -> ReplyKeyboardMarkup:
-    """
-    8-button persistent keyboard shown after /start.
-    Layout: 2 columns.
-    """
+    """10-button persistent keyboard, 2 columns."""
     builder = ReplyKeyboardBuilder()
     buttons = [
-        "𖠌",                       # AI chat trigger
-        "◈ المطور",                 # Developer profile
-        "◈ قناة الدعم ⚙️",          # Support channel
-        "◈ ٱلتحديثات 24/7 📢",       # Updates channel
-        "◈ الهدية اليومية 🎁",       # Gift channel
-        "◈ إستراحة",                # Chill message
-        "☰ معاينة",                 # Preview
-        "⧓ نبض النظام",             # System pulse
-        "محاكي التوقع",             # Future predictor
-        "المراقبة",                 # System monitor
+        "𖠌",
+        "◈ المطور",
+        "◈ قناة الدعم ⚙️",
+        "◈ ٱلتحديثات 24/7 📢",
+        "◈ الهدية اليومية 🎁",
+        "◈ إستراحة",
+        "☰ معاينة",
+        "⧓ نبض النظام",
+        "محاكي التوقع",
+        "المراقبة",
     ]
     for label in buttons:
         builder.add(KeyboardButton(text=label))
@@ -51,18 +52,23 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
 # ─── Developer Profile Inline Keyboard ───────────────────────────────────────
 
 def developer_profile_keyboard() -> InlineKeyboardMarkup:
-    """6-button inline keyboard with developer social links."""
-    links: list[tuple[str, str]] = [
-        ("📸 Instagram",  _url("DEV_INSTAGRAM")),
-        ("✈️ Telegram",   _url("DEV_TELEGRAM")),
-        ("🎵 TikTok",     _url("DEV_TIKTOK")),
-        ("📘 Facebook",   _url("DEV_FACEBOOK")),
-        ("💬 WhatsApp",   _url("DEV_WHATSAPP")),
-        ("🛠 Support",    _url("DEV_SUPPORT")),
+    """
+    6 social-link buttons. Buttons whose env var is not set are silently
+    omitted — Telegram rejects any URL that doesn't start with http/https.
+    """
+    candidates: list[tuple[str, str]] = [
+        ("📸 Instagram",  "DEV_INSTAGRAM"),
+        ("✈️ Telegram",   "DEV_TELEGRAM"),
+        ("🎵 TikTok",     "DEV_TIKTOK"),
+        ("📘 Facebook",   "DEV_FACEBOOK"),
+        ("💬 WhatsApp",   "DEV_WHATSAPP"),
+        ("🛠 Support",    "DEV_SUPPORT"),
     ]
     builder = InlineKeyboardBuilder()
-    for label, url in links:
-        builder.add(InlineKeyboardButton(text=label, url=url))
+    for label, env_key in candidates:
+        url = _url(env_key)
+        if url:
+            builder.add(InlineKeyboardButton(text=label, url=url))
     builder.adjust(2)
     return builder.as_markup()
 
@@ -70,10 +76,10 @@ def developer_profile_keyboard() -> InlineKeyboardMarkup:
 # ─── AI Chat Inline Controls ──────────────────────────────────────────────────
 
 def ai_chat_keyboard() -> InlineKeyboardMarkup:
-    """Inline controls shown after an AI reply."""
+    """Inline controls shown after every AI reply."""
     builder = InlineKeyboardBuilder()
     builder.add(
-        InlineKeyboardButton(text="🗑 مسح المحادثة", callback_data="ai:clear"),
+        InlineKeyboardButton(text="🗑 مسح المحادثة",   callback_data="ai:clear"),
         InlineKeyboardButton(text="🔄 إعادة المحاولة", callback_data="ai:retry"),
     )
     builder.adjust(2)
@@ -93,7 +99,7 @@ def cancel_keyboard() -> InlineKeyboardMarkup:
 def system_pulse_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.add(
-        InlineKeyboardButton(text="🔁 تحديث", callback_data="sys:refresh"),
+        InlineKeyboardButton(text="🔁 تحديث",   callback_data="sys:refresh"),
         InlineKeyboardButton(text="📊 تفاصيل", callback_data="sys:details"),
     )
     builder.adjust(2)
@@ -105,8 +111,8 @@ def system_pulse_keyboard() -> InlineKeyboardMarkup:
 def predictor_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.add(
-        InlineKeyboardButton(text="🔮 توقع جديد",  callback_data="pred:new"),
-        InlineKeyboardButton(text="📜 التوقعات السابقة", callback_data="pred:history"),
+        InlineKeyboardButton(text="🔮 توقع جديد",          callback_data="pred:new"),
+        InlineKeyboardButton(text="📜 التوقعات السابقة",   callback_data="pred:history"),
     )
     builder.adjust(1)
     return builder.as_markup()

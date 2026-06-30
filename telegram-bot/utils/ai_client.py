@@ -1,7 +1,16 @@
 """
 utils/ai_client.py — Unified AI provider client.
-Supports GROQ, OpenAI, OpenRouter, and Google Gemini.
+Supports GROQ, OpenAI, OpenRouter, Anthropic, OpenAI-Like, and Google Gemini.
 Active provider is selected via AI_PROVIDER in .env.
+
+Env-var names match Railway/Replit secrets exactly:
+  TOKEN                       — Telegram bot token (used in main.py)
+  GROQ_API_KEY                — Groq
+  OPENAI_API_KEY              — OpenAI
+  OPEN_ROUTER_API_KEY         — OpenRouter
+  ANTHROPIC_API_KEY           — Anthropic / Claude
+  OPENAI_LIKE_API_KEY         — Any OpenAI-compatible endpoint
+  GOOGLE_GENERATIVE_AI_API_KEY — Google Gemini
 """
 
 from __future__ import annotations
@@ -12,7 +21,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Lazy imports — only the active provider's SDK is imported at runtime.
+# Read once at import time — provider and model are static per deployment
 _PROVIDER = os.getenv("AI_PROVIDER", "groq").lower()
 _MODEL    = os.getenv("AI_MODEL", "llama-3.3-70b-versatile")
 
@@ -59,9 +68,9 @@ async def _call_openai(history: list[dict], user_text: str) -> str:
 async def _call_openrouter(history: list[dict], user_text: str) -> str:
     from openai import AsyncOpenAI  # type: ignore
 
-    # OpenRouter exposes an OpenAI-compatible endpoint
+    # FIX: env var is OPEN_ROUTER_API_KEY (with underscores)
     client = AsyncOpenAI(
-        api_key=os.environ["OPENROUTER_API_KEY"],
+        api_key=os.environ["OPEN_ROUTER_API_KEY"],
         base_url="https://openrouter.ai/api/v1",
         default_headers={
             "HTTP-Referer": "https://t.me/Zer0_0_bot",
@@ -80,47 +89,101 @@ async def _call_openrouter(history: list[dict], user_text: str) -> str:
     return response.choices[0].message.content.strip()
 
 
+async def _call_anthropic(history: list[dict], user_text: str) -> str:
+    """Anthropic Claude — uses native Messages API (not OpenAI-compat)."""
+    import anthropic  # type: ignore
+
+    client = anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+    # Anthropic doesn't use a system message inside the messages array
+    # Convert history: only "user" / "assistant" roles are valid
+    anthropic_messages = [
+        {"role": m["role"], "content": m["content"]}
+        for m in history
+        if m["role"] in ("user", "assistant")
+    ] + [{"role": "user", "content": user_text}]
+
+    response = await client.messages.create(
+        model=_MODEL if _MODEL else "claude-3-5-haiku-latest",
+        max_tokens=1024,
+        system=SYSTEM_PROMPT,
+        messages=anthropic_messages,
+    )
+    return response.content[0].text.strip()
+
+
+async def _call_openai_like(history: list[dict], user_text: str) -> str:
+    """
+    Any OpenAI-compatible endpoint (LM Studio, Together, Ollama, etc.).
+    Base URL must be set via OPENAI_LIKE_BASE_URL in .env.
+    Defaults to Together AI if not set.
+    """
+    from openai import AsyncOpenAI  # type: ignore
+
+    base_url = os.getenv("OPENAI_LIKE_BASE_URL", "https://api.together.xyz/v1")
+    client = AsyncOpenAI(
+        api_key=os.environ["OPENAI_LIKE_API_KEY"],
+        base_url=base_url,
+    )
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [
+        {"role": "user", "content": user_text}
+    ]
+    response = await client.chat.completions.create(
+        model=_MODEL,
+        messages=messages,
+        max_tokens=1024,
+        temperature=0.8,
+    )
+    return response.choices[0].message.content.strip()
+
+
 async def _call_google(history: list[dict], user_text: str) -> str:
     import google.generativeai as genai  # type: ignore
     import asyncio
 
-    genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+    # FIX: env var is GOOGLE_GENERATIVE_AI_API_KEY
+    genai.configure(api_key=os.environ["GOOGLE_GENERATIVE_AI_API_KEY"])
     model = genai.GenerativeModel(
         model_name=_MODEL or "gemini-1.5-flash",
         system_instruction=SYSTEM_PROMPT,
     )
     # Build Gemini-compatible history (roles: "user" / "model")
     gemini_history = [
-        {"role": "model" if m["role"] == "assistant" else "user", "parts": [m["content"]]}
+        {
+            "role": "model" if m["role"] == "assistant" else "user",
+            "parts": [m["content"]],
+        }
         for m in history
     ]
     chat = model.start_chat(history=gemini_history)
-    # google-generativeai is sync; run in thread to keep async context happy
+    # google-generativeai is sync; run in a thread to keep event loop free
     response = await asyncio.to_thread(chat.send_message, user_text)
     return response.text.strip()
 
 
-# ─── Dispatch table (no if/elif chains) ──────────────────────────────────────
+# ─── Dispatch table ───────────────────────────────────────────────────────────
+# To add a new provider: add one entry here + one async function above.
 
 _DISPATCH = {
-    "groq":       _call_groq,
-    "openai":     _call_openai,
-    "openrouter": _call_openrouter,
-    "google":     _call_google,
+    "groq":        _call_groq,
+    "openai":      _call_openai,
+    "openrouter":  _call_openrouter,
+    "anthropic":   _call_anthropic,
+    "openai_like": _call_openai_like,
+    "google":      _call_google,
 }
 
 
 async def ask_ai(history: list[dict], user_text: str) -> str:
     """
-    Send user_text + conversation history to the configured AI provider.
-    Returns the assistant's reply string.
-    Raises ValueError for unknown provider.
+    Dispatch to the active AI provider.
+    Provider is fixed at startup via AI_PROVIDER env var.
     """
     handler = _DISPATCH.get(_PROVIDER)
     if handler is None:
         raise ValueError(
             f"Unknown AI_PROVIDER='{_PROVIDER}'. "
-            f"Valid options: {list(_DISPATCH)}"
+            f"Valid: {list(_DISPATCH)}"
         )
     try:
         return await handler(history, user_text)
@@ -129,7 +192,7 @@ async def ask_ai(history: list[dict], user_text: str) -> str:
         return "⚠️ حدث خطأ أثناء التواصل مع الذكاء الاصطناعي. حاول مرة أخرى."
 
 
-# ─── Future Predictor (logic-based, no AI needed) ─────────────────────────────
+# ─── Future Predictor ────────────────────────────────────────────────────────
 
 import hashlib
 import datetime
@@ -150,8 +213,8 @@ _PREDICTIONS = [
 
 def generate_prediction(user_id: int) -> str:
     """
-    Deterministic but feels 'personal': seeds with user_id + today's date
-    so each user gets a consistent daily prediction.
+    Deterministic daily prediction — same user gets same result all day.
+    Seeded by user_id + today's ISO date.
     """
     seed = f"{user_id}:{datetime.date.today().isoformat()}"
     digest = int(hashlib.sha256(seed.encode()).hexdigest(), 16)
@@ -165,8 +228,8 @@ import asyncio as _asyncio
 
 async def get_system_pulse() -> dict:
     """
-    Returns live system metrics (CPU, RAM, uptime).
-    Uses psutil in a thread pool to keep the event loop non-blocking.
+    Live CPU / RAM / Disk / uptime metrics.
+    psutil is blocking — runs in a thread pool via asyncio.to_thread.
     """
     import psutil  # type: ignore
 
@@ -179,13 +242,13 @@ async def get_system_pulse() -> dict:
         hours, rem = divmod(int(uptime_sec), 3600)
         minutes    = rem // 60
         return {
-            "cpu_pct":   cpu,
-            "ram_used":  ram.used  // (1024 ** 2),   # MB
-            "ram_total": ram.total // (1024 ** 2),
-            "ram_pct":   ram.percent,
-            "disk_used": disk.used  // (1024 ** 3),  # GB
-            "disk_total":disk.total // (1024 ** 3),
-            "uptime":    f"{hours}h {minutes}m",
+            "cpu_pct":    cpu,
+            "ram_used":   ram.used   // (1024 ** 2),
+            "ram_total":  ram.total  // (1024 ** 2),
+            "ram_pct":    ram.percent,
+            "disk_used":  disk.used  // (1024 ** 3),
+            "disk_total": disk.total // (1024 ** 3),
+            "uptime":     f"{hours}h {minutes}m",
         }
 
     return await _asyncio.to_thread(_collect)
