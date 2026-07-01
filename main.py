@@ -10,6 +10,10 @@ import asyncio
 import logging
 import os
 import sys
+from pathlib import Path
+
+# Add telegram-bot directory to path so imports work correctly
+sys.path.insert(0, str(Path(__file__).parent / "telegram-bot"))
 
 from dotenv import load_dotenv
 
@@ -21,11 +25,11 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from telegram_bot.database import init_db, close_db
-from telegram_bot.handlers import messages as messages_router
-from telegram_bot.handlers import callbacks as callbacks_router
+from database import init_db, close_db
+from handlers import messages as messages_router
+from handlers import callbacks as callbacks_router
 
-# ─── Logging ──────────────────────────────────────────────────────────────────
+# ─── Logging ──────────────────────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,7 +40,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# ─── Build dispatcher ──────────────────────────────────────────────────────────
+# ─── Build dispatcher ──────────────────────────────────────────────────
 
 def build_dispatcher() -> Dispatcher:
     dp = Dispatcher(storage=MemoryStorage())
@@ -45,7 +49,7 @@ def build_dispatcher() -> Dispatcher:
     return dp
 
 
-# ─── Lifecycle ────────────────────────────────────────────────────────────────
+# ─── Lifecycle ────────────────────────────────────────────────────────
 
 async def on_startup(bot: Bot) -> None:
     """Called once before polling starts. DB must be ready before any update arrives."""
@@ -61,7 +65,7 @@ async def on_shutdown(bot: Bot) -> None:
     logger.info("Bot shut down cleanly.")
 
 
-# ─── Entry point ──────────────────────────────────────────────────────────────
+# ─── Entry point ──────────────────────────────────────────────────────
 
 async def main() -> None:
     # Secret name on Railway / Replit: TOKEN  (not BOT_TOKEN)
