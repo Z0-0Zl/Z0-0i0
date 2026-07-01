@@ -190,3 +190,39 @@ class ConversationDAO:
 
     async def clear_history(self, user_id: int) -> None:
         await ConversationMessage.filter(user_id=user_id).delete()
+
+
+# ─── Admin Audit Log ──────────────────────────────────────────────────────────
+
+class AdminLog(Model):
+    """Persistent audit trail for every admin action."""
+    __slots__ = ()
+
+    id          = fields.IntField(pk=True)
+    admin_id    = fields.BigIntField(index=True)   # Telegram user_id of admin
+    command     = fields.CharField(max_length=64)  # e.g. "stats", "broadcast", "db"
+    details     = fields.TextField(null=True)      # optional payload (broadcast text, etc.)
+    executed_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        table = "admin_logs"
+
+
+class AdminLogDAO:
+    """Write and read admin audit log entries."""
+    __slots__ = ()
+
+    async def log(
+        self,
+        admin_id: int,
+        command: str,
+        details: Optional[str] = None,
+    ) -> None:
+        await AdminLog.create(admin_id=admin_id, command=command, details=details)
+
+    async def get_recent(self, limit: int = 15) -> list[AdminLog]:
+        return (
+            await AdminLog.all()
+            .order_by("-executed_at")
+            .limit(limit)
+        )
