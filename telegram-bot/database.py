@@ -72,7 +72,6 @@ async def init_db() -> None:
     Creates tables if they don't exist (safe for first deploy).
     
     Production-ready configuration for Railway PostgreSQL + asyncpg.
-    Handles NoneType routers errors and ensures proper initialization.
     """
     raw_url = os.getenv("DATABASE_URL")
     if not raw_url:
@@ -84,26 +83,20 @@ async def init_db() -> None:
 
     db_url = _normalise_db_url(raw_url)
     
-    try:
-        # Initialize Tortoise-ORM with current module context
-        await Tortoise.init(
-            db_url=db_url,
-            modules={"models": ["__main__"]},
-        )
-        
-        # Explicitly initialize routers if None (prevents NoneType errors)
-        if Tortoise.routers is None:
-            Tortoise.routers = {}
-            logger.debug("Initialized Tortoise.routers as empty dict")
-        
-        # Generate schemas safely (no-op if tables exist)
-        await Tortoise.generate_schemas(safe=True)
-        
-        logger.info("✅ Database initialised | Scheme: %s | Connection: OK", db_url.split("://")[0])
-        
-    except Exception as e:
-        logger.critical("❌ Database initialization failed: %s", str(e))
-        raise
+    # Initialize Tortoise-ORM with routers explicitly configured
+    await Tortoise.init(
+        db_url=db_url,
+        modules={"models": ["__main__"]},
+    )
+    
+    # Ensure routers is initialized (prevents NoneType errors)
+    if Tortoise.routers is None:
+        Tortoise.routers = {}
+    
+    # Generate schemas safely (no-op if tables exist)
+    await Tortoise.generate_schemas(safe=True)
+    
+    logger.info("✅ Database initialised | Scheme: %s | Connection: OK", db_url.split("://")[0])
 
 
 async def close_db() -> None:
