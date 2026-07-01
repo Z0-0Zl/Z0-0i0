@@ -78,8 +78,15 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = build_dispatcher()
-    dp.startup.register(lambda: on_startup(bot))
-    dp.shutdown.register(lambda: on_shutdown(bot))
+
+    async def _startup() -> None:
+        await on_startup(bot)
+
+    async def _shutdown() -> None:
+        await on_shutdown(bot)
+
+    dp.startup.register(_startup)
+    dp.shutdown.register(_shutdown)
 
     logger.info("Starting polling (long-poll, no webhook)...")
     await dp.start_polling(
