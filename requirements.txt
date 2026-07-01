@@ -2,7 +2,7 @@ aiogram==3.13.1          # Telegram bot framework
 tortoise-orm==0.21.7     # Async ORM (replaces SQLAlchemy)
 asyncpg==0.30.0          # PostgreSQL async driver
 python-dotenv==1.0.1     # .env loader
-aiohttp==3.11.10         # HTTP client (used by aiogram)
+aiohttp~=3.10.0          # HTTP client (compatible with aiogram 3.13)
 groq==0.12.0             # Groq AI SDK
 openai==1.57.0           # OpenAI + OpenRouter SDK
 anthropic==0.40.0        # Anthropic Claude SDK
