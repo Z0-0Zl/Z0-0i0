@@ -28,6 +28,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from database import init_db, close_db
 from handlers import messages as messages_router
 from handlers import callbacks as callbacks_router
+from handlers import admin as admin_router
 
 # ─── Logging ──────────────────────────────────────────────────────────
 
@@ -45,7 +46,8 @@ logger = logging.getLogger(__name__)
 
 def build_dispatcher() -> Dispatcher:
     dp = Dispatcher(storage=MemoryStorage())
-    dp.include_router(messages_router.router)   # FSM states registered here first
+    dp.include_router(admin_router.router)      # admin first — highest priority filter
+    dp.include_router(messages_router.router)   # FSM states registered here
     dp.include_router(callbacks_router.router)  # catch-all callbacks last
     return dp
 
@@ -83,8 +85,15 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = build_dispatcher()
-    dp.startup.register(lambda: on_startup(bot))
-    dp.shutdown.register(lambda: on_shutdown(bot))
+
+    async def _startup() -> None:
+        await on_startup(bot)
+
+    async def _shutdown() -> None:
+        await on_shutdown(bot)
+
+    dp.startup.register(_startup)
+    dp.shutdown.register(_shutdown)
 
     logger.info("Starting polling (long-poll, no webhook)...")
     await dp.start_polling(
