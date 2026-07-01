@@ -56,13 +56,32 @@ class ConversationMessage(Model):
 
 def _normalise_db_url(raw: str) -> str:
     """
-    Tortoise-orm needs an asyncpg:// or postgres:// scheme.
-    Convert SQLAlchemy-style postgresql+asyncpg:// if present.
+    Tortoise-orm / asyncpg needs asyncpg:// or postgres:// scheme.
+
+    Fixes applied:
+    1. Convert SQLAlchemy postgresql+asyncpg:// and postgresql:// to asyncpg://
+    2. Strip ?sslmode=... query parameter — asyncpg does not accept it as a
+       URL query param (raises TypeError: unexpected keyword argument 'sslmode').
+       SSL is controlled separately if needed.
+    3. Preserve all other query parameters.
     """
-    return (
+    from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
+
+    # Step 1 – normalise scheme (order matters: longest prefix first)
+    url = (
         raw.replace("postgresql+asyncpg://", "asyncpg://")
            .replace("postgresql://",         "asyncpg://")
+           .replace("postgres://",           "asyncpg://")
     )
+
+    # Step 2 – strip sslmode (asyncpg rejects it as a URL query param)
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    params.pop("sslmode", None)   # remove if present; asyncpg handles SSL natively
+    new_query = urlencode({k: v[0] for k, v in params.items()})
+    cleaned = urlunparse(parsed._replace(query=new_query))
+
+    return cleaned
 
 
 async def init_db() -> None:
@@ -70,9 +89,12 @@ async def init_db() -> None:
     Initialise Tortoise-ORM with the DATABASE_URL env var.
     Raises clearly if the variable is missing.
     Creates tables if they don't exist (safe for first deploy).
-    
-    Production-ready configuration for Railway PostgreSQL + asyncpg.
-    Handles NoneType routers errors and ensures proper initialization.
+
+    FIX: modules must point to "database" (this module), NOT "__main__".
+    "__main__" is the entry-point script (main.py) which has no models —
+    using it causes Tortoise to initialise with an empty model registry,
+    leaving internal lists as None and triggering:
+        TypeError: 'NoneType' object is not iterable
     """
     raw_url = os.getenv("DATABASE_URL")
     if not raw_url:
@@ -83,27 +105,23 @@ async def init_db() -> None:
         )
 
     db_url = _normalise_db_url(raw_url)
-    
-    try:
-        # Initialize Tortoise-ORM with current module context
-        await Tortoise.init(
-            db_url=db_url,
-            modules={"models": ["__main__"]},
-        )
-        
-        # Explicitly initialize routers if None (prevents NoneType errors)
-        if Tortoise.routers is None:
-            Tortoise.routers = {}
-            logger.debug("Initialized Tortoise.routers as empty dict")
-        
-        # Generate schemas safely (no-op if tables exist)
-        await Tortoise.generate_schemas(safe=True)
-        
-        logger.info("✅ Database initialised | Scheme: %s | Connection: OK", db_url.split("://")[0])
-        
-    except Exception as e:
-        logger.critical("❌ Database initialization failed: %s", str(e))
-        raise
+
+    await Tortoise.init(
+        db_url=db_url,
+        modules={"models": ["database"]},
+    )
+
+    # Safety guard: ensure routers is always a list (never None)
+    if not isinstance(getattr(Tortoise, "routers", None), list):
+        Tortoise.routers = []
+        logger.debug("Tortoise.routers initialised to []")
+
+    await Tortoise.generate_schemas(safe=True)
+
+    logger.info(
+        "✅ Database initialised | scheme=%s | tables created/verified",
+        db_url.split("://")[0],
+    )
 
 
 async def close_db() -> None:
@@ -111,8 +129,8 @@ async def close_db() -> None:
     try:
         await Tortoise.close_connections()
         logger.info("✅ Database connections closed gracefully.")
-    except Exception as e:
-        logger.warning("⚠️  Error closing database connections: %s", str(e))
+    except Exception as exc:
+        logger.warning("⚠️  Error closing database connections: %s", exc)
 
 
 # ─── Data Access Objects ──────────────────────────────────────────────────────

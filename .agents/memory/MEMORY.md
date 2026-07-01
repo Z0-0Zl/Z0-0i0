@@ -1,0 +1,1 @@
+- [Tortoise-ORM modules fix](tortoise-modules.md) — modules must be `["database"]` not `["__main__"]`; also strip `sslmode` from DATABASE_URL for asyncpg

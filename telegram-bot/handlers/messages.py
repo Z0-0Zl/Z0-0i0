@@ -33,6 +33,15 @@ router = Router(name="messages")
 _user_dao = UserDAO()
 _conv_dao = ConversationDAO()
 
+# ─── Media URLs ───────────────────────────────────────────────────────────────
+
+_WELCOME_PHOTO     = "https://i.postimg.cc/3NzCRdQ9/Screenshot-20260630-090053.jpg"
+_AI_GIF            = "https://i.postimg.cc/Z5jVsmQL/2189a5bcd78e4caabceae6814719581a-ezgif-com-crop.gif"
+_DEV_PHOTO         = "https://i.postimg.cc/tgrqP2sW/IMG-20260620-133210-543.jpg"
+_DEV_GIF           = "https://i.postimg.cc/4dp4ZWV5/fc51dcdde83ebae17aa8e99ba8e9fe93.gif"
+_CHILL_GIF         = "https://i.postimg.cc/ZRJYbrc2/59acd10f528c5f5a91cdd51bff9e968f-ezgif-com-crop.gif"
+_MONITOR_GIF       = "https://i.postimg.cc/4nkkNcRY/9b328b3561bc3750fb0718a802e19c62.gif"
+
 
 # ─── FSM States ───────────────────────────────────────────────────────────────
 
@@ -67,11 +76,18 @@ def register_user(handler):
 @register_user
 async def cmd_start(message: Message, state: FSMContext) -> None:
     await state.clear()
-    await message.answer(
+    caption = (
         "لا شيء.. كل شيء.. ٱلرمـ𖠌ــز الذي يختصر الحكاية.\n\n"
-        "اختر ما تشاء من القائمة أدناه 👇",
-        reply_markup=main_menu_keyboard(),
+        "اختر ما تشاء من القائمة أدناه 👇"
     )
+    try:
+        await message.answer_photo(
+            photo=_WELCOME_PHOTO,
+            caption=caption,
+            reply_markup=main_menu_keyboard(),
+        )
+    except Exception:
+        await message.answer(caption, reply_markup=main_menu_keyboard())
 
 
 # ─── /clear ───────────────────────────────────────────────────────────────────
@@ -88,21 +104,34 @@ async def cmd_clear(message: Message, state: FSMContext) -> None:
 @router.message(F.text == "𖠌")
 async def btn_ai_chat(message: Message, state: FSMContext) -> None:
     await state.set_state(AIChat.waiting_for_input)
-    await message.answer(
-        "𖠌 — أنا هنا.\nاكتب ما يجول في خاطرك...",
-        reply_markup=ai_chat_keyboard(),
-    )
+    caption = "𖠌 — أنا هنا.\nاكتب ما يجول في خاطرك..."
+    try:
+        await message.answer_animation(
+            animation=_AI_GIF,
+            caption=caption,
+            reply_markup=ai_chat_keyboard(),
+        )
+    except Exception:
+        await message.answer(caption, reply_markup=ai_chat_keyboard())
 
 
 @router.message(F.text == "◈ المطور")
 @register_user
 async def btn_developer(message: Message) -> None:
-    await message.answer(
+    text = (
         "◈ <b>المطور</b>\n\n"
         "مُهندس الظلام، نسّاج الكود، صانع الرمز.\n"
-        "تواصل عبر المنصات أدناه 👇",
-        reply_markup=developer_profile_keyboard(),
+        "تواصل عبر المنصات أدناه 👇"
     )
+    try:
+        await message.answer_photo(photo=_DEV_PHOTO)
+        await message.answer_animation(
+            animation=_DEV_GIF,
+            caption=text,
+            reply_markup=developer_profile_keyboard(),
+        )
+    except Exception:
+        await message.answer(text, reply_markup=developer_profile_keyboard())
 
 
 @router.message(F.text == "◈ قناة الدعم ⚙️")
@@ -144,7 +173,14 @@ async def btn_chill(message: Message) -> None:
         "لا شيء يستحق أن يُربك سكينتك الداخلية.",
         "توقّف.. وانظر كم أنت بعيد عن حيث كنت.",
     ]
-    await message.answer(f"☁️ {random.choice(pool)}")
+    quote = random.choice(pool)
+    try:
+        await message.answer_animation(
+            animation=_CHILL_GIF,
+            caption=f"☁️ {quote}",
+        )
+    except Exception:
+        await message.answer(f"☁️ {quote}")
 
 
 @router.message(F.text == "☰ معاينة")
@@ -190,13 +226,20 @@ async def btn_predictor(message: Message) -> None:
 async def btn_monitor(message: Message) -> None:
     pulse = await get_system_pulse()
     bars = lambda pct: "█" * int(pct / 10) + "░" * (10 - int(pct / 10))
-    await message.answer(
+    monitor_text = (
         f"📡 <b>المراقبة — حالة النظام</b>\n\n"
         f"CPU  [{bars(pulse['cpu_pct'])}] {pulse['cpu_pct']}%\n"
         f"RAM  [{bars(pulse['ram_pct'])}] {pulse['ram_pct']}%\n\n"
         f"🕐 وقت التشغيل: <code>{pulse['uptime']}</code>\n"
         f"الحالة: 🟢 يعمل"
     )
+    try:
+        await message.answer_animation(
+            animation=_MONITOR_GIF,
+            caption=monitor_text,
+        )
+    except Exception:
+        await message.answer(monitor_text)
 
 
 # ─── AI Chat FSM handler ──────────────────────────────────────────────────────
@@ -218,13 +261,9 @@ async def handle_ai_message(message: Message, state: FSMContext) -> None:
 
     thinking = await message.answer("𖠌 ...")
 
-    # Lazy-load only this user's history
     history = await _conv_dao.get_history(message.from_user.id)
-
-    # Call active AI provider
     reply = await ask_ai(history, user_text)
 
-    # Persist both turns
     await _conv_dao.add_message(message.from_user.id, "user",      user_text)
     await _conv_dao.add_message(message.from_user.id, "assistant", reply)
 

@@ -1,45 +1,48 @@
-# [Project name]
+# Zer0 Bot — 𖠌
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+تلغرام بوت ذكاء اصطناعي غامض يعمل على Railway، مبني بـ aiogram 3 + Tortoise-ORM + PostgreSQL.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- `python main.py` — تشغيل البوت (polling mode، بلا webhook)
+- الكود في `/telegram-bot/`، نقطة الدخول هي `main.py` في الجذر
+
+## Required Secrets (Railway / Replit)
+
+- `TOKEN` — Telegram Bot Token
+- `DATABASE_URL` — PostgreSQL connection string (asyncpg:// أو postgres://)
+- `GROQ_API_KEY` — (اختياري) لتفعيل الذكاء الاصطناعي عبر Groq
+
+## Optional Secrets
+
+- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPEN_ROUTER_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`
+- `DEV_INSTAGRAM`, `DEV_TELEGRAM`, `DEV_TIKTOK`, `DEV_FACEBOOK`, `DEV_WHATSAPP`, `DEV_SUPPORT`
+- `SUPPORT_CHANNEL`, `UPDATES_CHANNEL`, `GIFT_CHANNEL`
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Python 3.11+
+- aiogram 3.13.1 — Telegram Bot Framework
+- Tortoise-ORM 0.21.7 + asyncpg — PostgreSQL async
+- Railway — Deployment platform
 
-## Where things live
+## Architecture
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `main.py` (root) — Entry point: adds telegram-bot/ to sys.path, wires routers, starts polling
+- `telegram-bot/database.py` — Models (User, ConversationMessage) + DAOs + init_db/close_db
+- `telegram-bot/handlers/messages.py` — Command + text button handlers
+- `telegram-bot/handlers/callbacks.py` — Inline button callbacks dispatcher
+- `telegram-bot/keyboards.py` — Keyboard factory functions
+- `telegram-bot/utils/ai_client.py` — Multi-provider AI client
 
-## Architecture decisions
+## Critical Notes
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- `modules={"models": ["database"]}` في Tortoise.init() — يجب أن يشير إلى وحدة "database" وليس "__main__"
+- Tortoise.routers يجب أن تكون list وليس None أو dict
+- البوت يعمل بـ long-polling فقط — لا webhook
 
-## Product
+## User Preferences
 
-_Describe the high-level user-facing capabilities of this app once they exist._
-
-## User preferences
-
-_Populate as you build — explicit user instructions worth remembering across sessions._
-
-## Gotchas
-
-_Populate as you build — sharp edges, "always run X before Y" rules._
-
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- لا تغيّر أوامر البوت أو Callbacks أو Handlers أو أسماء الأزرار
+- أي تعديل يجب أن يكون إصلاحاً فقط وليس إعادة تصميم
+- متغيرات GITHUB_TOKEN و RAILWAY_TOKEN موجودة كـ Secrets
