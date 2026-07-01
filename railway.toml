@@ -1,0 +1,5 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+command = "python main.py"
