@@ -7,7 +7,13 @@
 
 ## 🔥 Project Overview
 
-![Header](https://postimg.cc/9wZg09fZ)
+!<div align="center">
+
+![Header Animation 1](https://i.postimg.cc/T1Byj7xk/9455d4b5f018a070a3e39e666ab1b038-ezgif-com-crop-(1).gif)
+
+![Header Animation 2](https://i.postimg.cc/vmXc2HMz/9f9e0ca9207312ce6e89196b2358c809-ezgif-com-crop-(1).gif)
+
+</div>
 
 This is not just another Telegram bot. This is a **silent orchestrator**—a sophisticated, async-first system that bridges complex logic with real-time interactions. Built with cutting-edge Python frameworks and AI integration, this bot operates in the shadows, delivering results without noise.
 
