@@ -7,7 +7,7 @@
 
 ## 🔥 Project Overview
 
-**[IMAGE PLACEHOLDER 1: Header GIF - Replace with your animated header]**
+![Header](https://postimg.cc/9wZg09fZ)
 
 This is not just another Telegram bot. This is a **silent orchestrator**—a sophisticated, async-first system that bridges complex logic with real-time interactions. Built with cutting-edge Python frameworks and AI integration, this bot operates in the shadows, delivering results without noise.
 
@@ -22,7 +22,8 @@ This is not just another Telegram bot. This is a **silent orchestrator**—a sop
 
 ## 👤 Developer Profile
 
-**[IMAGE PLACEHOLDER 2: Developer Identity Card - Your personal branding card]**
+![Developer Profile](https://i.postimg.cc/T3Zbjskr/file-000000000de871f49222a3b91c27ac54.png)
+
 
 ### Yousef Z. A. Shaheen
 **@Y9_S4** | Telegram Developer & Content Creator
@@ -33,7 +34,8 @@ This is not just another Telegram bot. This is a **silent orchestrator**—a sop
 
 ## 🛠 Tech Stack
 
-**[IMAGE PLACEHOLDER 3: Technology Stack - Dev tools & frameworks]**
+![Tech Stack](https://i.postimg.cc/q7c7hBzz/8e67316196e749f8ced32943d051d3e1.jpg)
+
 
 ### Core Framework
 - **aiogram 3.13.1** - Modern async Telegram bot framework
